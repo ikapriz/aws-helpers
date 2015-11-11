@@ -1,0 +1,10 @@
+#!/home/vagrant/.rvm/rubies/ruby-2.2.3/bin/ruby
+
+require 'aws-sdk-core'
+
+cloudformation = Aws::CloudFormation::Client.new(region: 'us-east-1')
+cloudformation.operation_names
+
+ARGV.each do|a|
+  puts "Argument: #{a}"
+end
