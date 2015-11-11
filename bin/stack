@@ -2,26 +2,119 @@
 
 require 'aws-sdk-core'
 require 'awesome_print'
+require 'getoptlong'
+
+opts = GetoptLong.new(
+  [ '--help', '-h', GetoptLong::NO_ARGUMENT ],
+  [ '--puppet-first', '-f', GetoptLong::NO_ARGUMENT ],
+  [ '--info', '-i', GetoptLong::NO_ARGUMENT ]
+)
+
+action = :info
+
+opts.each do |opt, arg|
+  case opt
+    when '--help'
+      puts <<-EOF
+hello [OPTION] ... DIR
+
+-h, --help:
+   show help
+
+--repeat x, -n x:
+   repeat x times
+
+--name [name]:
+   greet user by name, if name not supplied default is John
+
+DIR: The directory in which to issue the greeting.
+      EOF
+	  exit
+    when '--puppet-first'
+      action = :puppet_first
+    when '--info'
+	  action = :info
+  end
+end
 
 cfm = Aws::CloudFormation::Client.new(region: 'us-east-1')
 ec2 = Aws::EC2::Client.new(region: 'us-east-1')
 
-ARGV.each do|stackname|
-	resp = cfm.describe_stack_resources({"stack_name" =>stackname})
-	resp[:stack_resources].each do |resource|
-		if resource[:resource_type] == "AWS::EC2::Instance" then
-			instance=ec2.describe_instances(:instance_ids => [resource[:physical_resource_id]])
-			puts [	resource[:resource_type], 
-					resource[:logical_resource_id], 
-					resource[:physical_resource_id], 
-					resource[:resource_status],
-					instance[:reservations][0][:instances][0][:private_ip_address] ].join("\t")
-		else
-			puts [	resource[:resource_type], 
-					resource[:logical_resource_id], 
-					resource[:physical_resource_id], 
-					resource[:resource_status] ].join("\t")
+case action 
+when :info
+	ARGV.each do|stackname|
+		resp = cfm.describe_stack_resources({"stack_name" =>stackname})
+		resp[:stack_resources].each do |resource|
+			if resource[:resource_type] == "AWS::EC2::Instance" then
+				instance=ec2.describe_instances(:instance_ids => [resource[:physical_resource_id]])
+				puts [	resource[:resource_type], 
+						resource[:logical_resource_id], 
+						resource[:physical_resource_id], 
+						resource[:resource_status],
+						instance[:reservations][0][:instances][0][:private_ip_address] ].join("\t")
+			else
+				puts [	resource[:resource_type], 
+						resource[:logical_resource_id], 
+						resource[:physical_resource_id], 
+						resource[:resource_status] ].join("\t")
+			end
+		end
+	end
+when :puppet_first
+	ARGV.each do|stackname|
+		fqdnlist=[]
+		resp = cfm.describe_stack_resources({"stack_name" =>stackname})
+		resp[:stack_resources].each do |resource|
+			if resource[:resource_type] == "AWS::EC2::Instance" then
+				instance=ec2.describe_instances(:instance_ids => [resource[:physical_resource_id]])
+				# First puppet run on the server
+
+				ip=instance[:reservations][0][:instances][0][:private_ip_address]
+				fqdnlist.push(:ip => ip})
+			end
+		end
+
+		fqdnlist.each do |p|
+			ip=p[:ip];
+
+			puts `ssh -tt -o StrictHostKeyChecking=no root@#{ip} "puppet agent --enable"`
+			puts `ssh -tt -o StrictHostKeyChecking=no root@#{ip} "puppet agent -t"`
+		end
+	end
+when :puppet_cert
+	ARGV.each do|stackname|
+		fqdnlist=[]
+		resp = cfm.describe_stack_resources({"stack_name" =>stackname})
+		resp[:stack_resources].each do |resource|
+			if resource[:resource_type] == "AWS::EC2::Instance" then
+				instance=ec2.describe_instances(:instance_ids => [resource[:physical_resource_id]])
+				# First puppet run on the server
+
+				ip=instance[:reservations][0][:instances][0][:private_ip_address]
+				fqdn = `ssh -q -tt -o StrictHostKeyChecking=no root@#{ip} "/bin/hostname --fqdn" | grep -v "bash: warning: setlocale:"`
+				fqdnlist.push({:fqdn => fqdn, :ip => ip})
+			end
+		end
+
+		fqdnlist.each do |p|
+			ip=p[:ip];
+			fqdn=p[:fqdn]
+
+			puts `ssh -tt -o StrictHostKeyChecking=no root@#{ip} "puppet agent -t"`
+		end
+
+		fqdnlist.each do |p|
+			ip=p[:ip];
+			fqdn=p[:fqdn]
+
+			puts "puppet cert sign #{fqdn}"
+		end
+
+		fqdnlist.each do |p|
+			ip=p[:ip];
+			fqdn=p[:fqdn]
+
+			puts `ssh -tt -o StrictHostKeyChecking=no root@#{ip} "puppet agent --enable"`
 		end
 	end
 end
-
