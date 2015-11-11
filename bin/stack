@@ -1,10 +1,27 @@
 #!/home/vagrant/.rvm/rubies/ruby-2.2.3/bin/ruby
 
 require 'aws-sdk-core'
+require 'awesome_print'
 
-cloudformation = Aws::CloudFormation::Client.new(region: 'us-east-1')
-cloudformation.operation_names
+cfm = Aws::CloudFormation::Client.new(region: 'us-east-1')
+ec2 = Aws::EC2::Client.new(region: 'us-east-1')
 
-ARGV.each do|a|
-  puts "Argument: #{a}"
+ARGV.each do|stackname|
+	resp = cfm.describe_stack_resources({"stack_name" =>stackname})
+	resp[:stack_resources].each do |resource|
+		if resource[:resource_type] == "AWS::EC2::Instance" then
+			instance=ec2.describe_instances(:instance_ids => [resource[:physical_resource_id]])
+			puts [	resource[:resource_type], 
+					resource[:logical_resource_id], 
+					resource[:physical_resource_id], 
+					resource[:resource_status],
+					instance[:reservations][0][:instances][0][:private_ip_address] ].join("\t")
+		else
+			puts [	resource[:resource_type], 
+					resource[:logical_resource_id], 
+					resource[:physical_resource_id], 
+					resource[:resource_status] ].join("\t")
+		end
+	end
 end
+
